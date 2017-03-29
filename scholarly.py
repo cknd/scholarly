@@ -42,25 +42,20 @@ _SESSION = requests.Session()
 _PAGESIZE = 100
 
 
-def _handle_captcha(url):
-    # TODO: PROBLEMS HERE! NEEDS ATTENTION
-    # Get the captcha image
-    captcha_url = _HOST + '/sorry/image?id={0}'.format(g_id)
-    captcha = _SESSION.get(captcha_url, headers=_HEADERS)
-    # Upload to remote host and display to user for human verification
-    img_upload = requests.post('http://postimage.org/',
-        files={'upload[]': ('scholarly_captcha.jpg', captcha.text)})
-    print(img_upload.text)
-    img_url_soup = BeautifulSoup(img_upload.text, 'html.parser')
-    img_url = img_url_soup.find_all(alt='scholarly_captcha')[0].get('src')
-    print('CAPTCHA image URL: {0}'.format(img_url))
-    # Need to check Python version for input
+_CAPTCHA_PATH = 'scholarly_captcha.png'
+
+def _handle_captcha(captcha_url, dest_url):
+    captcha = _SESSION.get(_HOST+captcha_url, headers=_HEADERS, cookies=_COOKIES)
+    contents = captcha.content
+    with open(_CAPTCHA_PATH, 'wb') as f:
+        f.write(contents)
+
     if sys.version[0]=="3":
-        g_response = input('Enter CAPTCHA: ')
+        g_response = input('Enter CAPTCHA at %s ' % _CAPTCHA_PATH)
     else:
-        g_response = raw_input('Enter CAPTCHA: ')
+        g_response = raw_input('Enter CAPTCHA at %s ' % _CAPTCHA_PATH)
     # Once we get a response, follow through and load the new page.
-    url_response = _HOST+'/sorry/CaptchaRedirect?continue={0}&id={1}&captcha={2}&submit=Submit'.format(dest_url, g_id, g_response)
+    url_response = _HOST+'/sorry/CaptchaRedirect?continue={0}&id={1}&captcha={2}&submit=Submit'.format(dest_url, _GOOGLEID, g_response)
     resp_captcha = _SESSION.get(url_response, headers=_HEADERS, cookies=_COOKIES)
     print('Forwarded to {0}'.format(resp_captcha.url))
     return resp_captcha.url
@@ -69,21 +64,19 @@ def _handle_captcha(url):
 def _get_page(pagerequest):
     """Return the data for a page on scholar.google.com"""
     # Note that we include a sleep to avoid overloading the scholar server
-    time.sleep(5+random.uniform(0, 5))
+    time.sleep(2+random.uniform(0, 2))
     resp = _SESSION.get(pagerequest, headers=_HEADERS, cookies=_COOKIES)
     if resp.status_code == 200:
         return resp.text
     if resp.status_code == 503:
-        # Inelegant way of dealing with the G captcha
-        raise Exception('Error: {0} {1}'.format(resp.status_code, resp.reason))
-        # TODO: Need to fix captcha handling
-        # dest_url = requests.utils.quote(_SCHOLARHOST+pagerequest)
-        # soup = BeautifulSoup(resp.text, 'html.parser')
-        # captcha_url = soup.find('img').get('src')
-        # resp = _handle_captcha(captcha_url)
-        # return _get_page(re.findall(r'https:\/\/(?:.*?)(\/.*)', resp)[0])
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        captcha_url = soup.find('img').get('src')
+        dest_url = requests.utils.quote(_HOST+pagerequest)
+        resp = _handle_captcha(captcha_url, dest_url)
+        return _get_page(re.match(r'.*continue=(.*)', resp).group(1))
     else:
         raise Exception('Error: {0} {1}'.format(resp.status_code, resp.reason))
+
 
 
 def _get_soup(pagerequest):
